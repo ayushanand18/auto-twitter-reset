@@ -1,8 +1,8 @@
 """
 API to send password reset emails
 """
-from flask import Flask, request, jsonify
 import re
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
@@ -30,18 +30,18 @@ def send():
     try:
         email = request.args.get('email')
         username = request.args.get('username')
-        
+
         # check email regex, if it is valid or not
         regex_email = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b'
-        
+
         if not re.fullmatch(regex_email, email):
             raise InvalidEmail
-        
+
         # catch if the length of username is more than 15
         # characters (specified in the bounty requirements)
         if len(username)>15:
             raise UsernameExceedLimit
-        
+
         status = send_password_reset_email(email, username)
         res = {
             "status": status,
