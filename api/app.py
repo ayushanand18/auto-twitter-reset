@@ -2,10 +2,13 @@
 API to send password reset emails
 """
 import re
+import asyncio
 from flask import Flask, request, jsonify
+from pyppeteer import launch
+from flask_socketio import SocketIO
 
 app = Flask(__name__)
-
+socketio = SocketIO(app)
 # -------------------
 # Application Routes
 # -------------------
@@ -23,13 +26,14 @@ def home():
     return jsonify(res)
 
 @app.route('/send')
-def send():
+async def send():
     """
     endpoint: send password reset emails
     """
     try:
         email = request.args.get('email')
         username = request.args.get('username')
+        phone_number = request.args.get('phone')
 
         # check email regex, if it is valid or not
         regex_email = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b'
@@ -42,12 +46,13 @@ def send():
         if len(username)>15:
             raise UsernameExceedLimit
 
-        status = send_password_reset_email(email, username)
+        status = await send_password_reset_email(email, username, phone_number)
         res = {
             "status": status,
             "message": "completed request"
         }
         return jsonify(res)
+
     except Exception as error:
         res = {
             "status": "error_message",
@@ -58,13 +63,63 @@ def send():
 # ----------------------------
 # Sending Password Reset Email
 # ----------------------------
-def send_password_reset_email(email: str, username: str) -> bool:
+async def send_password_reset_email(email: str, username: str, phone_number: int) -> bool:
     """
     Send Password Reset Email Logic
     """
-    req = email+username
+    browser = await launch(
+        handleSIGINT=False,
+        handleSIGTERM=False,
+        handleSIGHUP=False,
+        options={'args': ['--no-sandbox']}
+    )
+    page = await browser.newPage()
+    
+    await page.goto("https://twitter.com/i/flow/password_reset?input_flow_data=%7B%22requested_variant%22%3A%22eyJwbGF0Zm9ybSI6IlJ3ZWIifQ%3D%3D%22%7D")
+    await page.evaluate(
+        f"""
+        document.querySelector("input").value = {username};
+        document.querySelectorAll("[role='button']")[1].click();
+        """)
+    await page.evaluate(
+        f"""
+        document.querySelectorAll("input").value = {email};
+        document.querySelectorAll("[role='button']")[1].click();
+        """
+    )
+    alerts = await page.evaluate(
+        """ 
+        () => {
+            return document.querySelectorAll("[role='alert']").length;
+        }
+        """
+    )
+    if(alerts): raise IncorrectDetails
 
-    return req
+    await page.evaluate(
+        f"""
+        document.querySelector("input").value = {phone_number};
+        document.querySelectorAll("[role='button']")[1].click();
+        """
+    )
+    alerts = await page.evaluate(
+        """ 
+        () => {
+            return document.querySelectorAll("[role='alert']").length;
+        }
+        """
+    )
+    if(alerts): raise IncorrectDetails
+
+    await page.evaluate(
+        """
+        document.querySelectorAll("[role='button']")[1].click();
+        """
+    )
+
+    await browser.close()
+
+    return True
 
 # -----------------
 # Custom Exceptions
@@ -81,5 +136,11 @@ class InvalidEmail(Exception):
         super().__init__(message, *args)
         self.message = message
 
+class IncorrectDetails(Exception):
+    "Raised when wrong account info is provided."
+    def __init__(self, message="Incorrect Account Details. Failed to verify.", *args):
+        super().__init__(message, *args)
+        self.message = message
+
 if __name__ == '__main__':
-    app.run()
+    socketio.run(app)
