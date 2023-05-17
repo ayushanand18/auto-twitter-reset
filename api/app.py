@@ -6,6 +6,7 @@ import asyncio
 from flask import Flask, request, jsonify
 from pyppeteer import launch
 from flask_socketio import SocketIO
+from time import sleep
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -48,7 +49,7 @@ async def send():
 
         status = await send_password_reset_email(email, username, phone_number)
         res = {
-            "status": status,
+            "status": "success" if len(status)==4 else "failed",
             "message": "completed request"
         }
         return jsonify(res)
@@ -76,17 +77,26 @@ async def send_password_reset_email(email: str, username: str, phone_number: int
     page = await browser.newPage()
     
     await page.goto("https://twitter.com/i/flow/password_reset?input_flow_data=%7B%22requested_variant%22%3A%22eyJwbGF0Zm9ybSI6IlJ3ZWIifQ%3D%3D%22%7D")
+    response = []
+    
+    sleep(3)
+
     await page.evaluate(
         f"""
-        document.querySelector("input").value = {username};
+        document.querySelector("input").value = '{username}';
         document.querySelectorAll("[role='button']")[1].click();
         """)
+    response.append("username")
+
+    sleep(2)
+
     await page.evaluate(
         f"""
-        document.querySelectorAll("input").value = {email};
+        document.querySelectorAll("input").value = "{email}";
         document.querySelectorAll("[role='button']")[1].click();
         """
     )
+    response.append("email")
     alerts = await page.evaluate(
         """ 
         () => {
@@ -96,12 +106,16 @@ async def send_password_reset_email(email: str, username: str, phone_number: int
     )
     if(alerts): raise IncorrectDetails
 
+    sleep(2)
+    
     await page.evaluate(
         f"""
         document.querySelector("input").value = {phone_number};
         document.querySelectorAll("[role='button']")[1].click();
         """
     )
+    response.append("phone number")
+
     alerts = await page.evaluate(
         """ 
         () => {
@@ -111,15 +125,17 @@ async def send_password_reset_email(email: str, username: str, phone_number: int
     )
     if(alerts): raise IncorrectDetails
 
+    sleep(2) # so that there's a buffer time to load the page
+
     await page.evaluate(
         """
         document.querySelectorAll("[role='button']")[1].click();
         """
     )
-
+    response.append("submitted")
     await browser.close()
 
-    return True
+    return response
 
 # -----------------
 # Custom Exceptions
